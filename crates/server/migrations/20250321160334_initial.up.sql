@@ -35,3 +35,40 @@ CREATE TABLE IF NOT EXISTS scores (
     created_at TEXT NOT NULL DEFAULT (datetime ('now')),
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
+
+CREATE TABLE IF NOT EXISTS game_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    user_id INTEGER NOT NULL,
+    payment_id TEXT NOT NULL UNIQUE,
+    invoice TEXT NOT NULL,
+    amount_sats INTEGER NOT NULL,
+    status TEXT NOT NULL, -- 'pending', 'paid', 'expired', 'failed'
+    created_at TEXT NOT NULL DEFAULT (datetime ('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime ('now')),
+    paid_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+CREATE TABLE IF NOT EXISTS prize_payouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    user_id INTEGER NOT NULL,
+    date TEXT NOT NULL, -- Date in YYYY-MM-DD format
+    score INTEGER NOT NULL,
+    amount_sats INTEGER NOT NULL,
+    payment_request TEXT, -- User's provided invoice
+    payment_id TEXT,
+    status TEXT NOT NULL, -- 'pending', 'paid', 'failed'
+    created_at TEXT NOT NULL DEFAULT (datetime ('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime ('now')),
+    paid_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+-- Index for finding daily high scores
+CREATE INDEX idx_scores_date ON scores (created_at);
+
+-- Index for tracking payment status
+CREATE INDEX idx_game_payments_status ON game_payments (status);
+
+-- Index for checking if user already won
+CREATE UNIQUE INDEX idx_prize_payouts_user_date ON prize_payouts (user_id, date);

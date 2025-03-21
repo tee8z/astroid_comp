@@ -68,6 +68,11 @@ pub struct APISettings {
     pub port: String,
     /// Nostr private key used to sign game data and verify users
     pub private_key_file: String,
+    pub voltage_api_key: String,
+    pub voltage_api_url: String,
+    pub voltage_org_id: String,
+    pub voltage_env_id: String,
+    pub voltage_wallet_id: String,
 }
 
 impl Default for APISettings {
@@ -76,6 +81,11 @@ impl Default for APISettings {
             domain: String::from("127.0.0.1"),
             port: String::from("8900"),
             private_key_file: String::from("./creds/private.key"),
+            voltage_api_key: String::from(""),
+            voltage_api_url: String::from("https://voltageapi.com/v1/"),
+            voltage_org_id: String::from(""),
+            voltage_env_id: String::from(""),
+            voltage_wallet_id: String::from(""),
         }
     }
 }

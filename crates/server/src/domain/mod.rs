@@ -1,11 +1,13 @@
 mod games;
+mod payments;
 mod users;
 
-use axum::response::{IntoResponse, Response};
 pub use games::*;
-use hyper::StatusCode;
+pub use payments::*;
 pub use users::*;
 
+use axum::response::{IntoResponse, Response};
+use hyper::StatusCode;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

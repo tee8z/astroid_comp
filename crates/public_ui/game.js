@@ -16,6 +16,7 @@ const sounds = {
 let gameConfig = null;
 let sessionId = null;
 let lastConfigUpdate = 0;
+let pendingGameStart = false;
 
 // Game entities
 let ship = {};
@@ -31,6 +32,8 @@ let timeElement;
 let gameOverDialog;
 let finalScoreElement;
 let restartButton;
+let welcomeScreen;
+let gameSectionContent;
 
 // Try to load sounds but handle errors gracefully
 try {
@@ -48,40 +51,227 @@ try {
 }
 
 function checkAuthStatus() {
+  if (!welcomeScreen) welcomeScreen = document.getElementById("welcome-screen");
+  if (!gameSectionContent)
+    gameSectionContent = document.querySelector(".game-section-content");
+
   if (window.gameAuth && window.gameAuth.isLoggedIn()) {
-    // User is logged in, hide start screen and start game
-    const startScreen = document.getElementById("start-screen");
-    if (startScreen) {
-      startScreen.style.display = "none";
+    // User is logged in
+
+    // Hide welcome screen
+    if (welcomeScreen) {
+      welcomeScreen.style.display = "none";
     }
 
-    // Only initialize game if not already started
-    if (!gameConfig) {
-      initGame();
+    // Show game section and content
+    document.getElementById("game-section").style.display = "block";
+
+    if (gameSectionContent) {
+      gameSectionContent.style.display = "block";
     }
-  } else {
-    // User is not logged in, show start screen with login/register buttons
+
+    // Show start screen, hide game container
     const startScreen = document.getElementById("start-screen");
     if (startScreen) {
       startScreen.style.display = "flex";
     }
+
+    const gameContainer = document.querySelector(".game-container");
+    if (gameContainer) {
+      gameContainer.style.display = "none";
+    }
+
+    // Show the Play Game button
+    const playGameButton = document.getElementById("show-game");
+    if (playGameButton) {
+      playGameButton.style.display = "inline-block";
+    }
+  } else {
+    // User is not logged in, show welcome screen and hide game
+    if (welcomeScreen) {
+      welcomeScreen.style.display = "flex";
+    }
+    if (gameSectionContent) {
+      gameSectionContent.style.display = "none";
+    }
+
+    // Hide the Play Game button
+    const playGameButton = document.getElementById("show-game");
+    if (playGameButton) {
+      playGameButton.style.display = "none";
+    }
+
+    document.getElementById("game-section").style.display = "none";
+  }
+}
+
+function startGame() {
+  console.log("Starting game...");
+
+  // Disable the start button while processing
+  const startGameBtn = document.getElementById("startGameBtn");
+  if (startGameBtn) {
+    startGameBtn.disabled = true;
+    startGameBtn.textContent = "Loading...";
+  }
+
+  // Make sure the payment handler is initialized
+  window
+    .initializePaymentHandler()
+    .then((paymentHandler) => {
+      console.log("Payment handler ready, requesting game session");
+      return paymentHandler.requestGameSession();
+    })
+    .then((result) => {
+      // Re-enable the button
+      if (startGameBtn) {
+        startGameBtn.disabled = false;
+        startGameBtn.textContent = "Start Game";
+      }
+
+      if (result && result.success) {
+        // Session created successfully, start the game
+        startGameWithConfig(result.data);
+      } else if (result && result.requiresPayment) {
+        // Payment required - this is handled by the payment handler
+        console.log("Waiting for payment to complete...");
+        pendingGameStart = true;
+      } else {
+        // Some other error
+        console.error(
+          "Failed to start game:",
+          result ? result.error : "Unknown error",
+        );
+        alert("Failed to start game. Please try again.");
+      }
+    })
+    .catch((error) => {
+      console.error("Error starting game:", error);
+      if (startGameBtn) {
+        startGameBtn.disabled = false;
+        startGameBtn.textContent = "Start Game";
+      }
+
+      // Fall back to the old way if there's an error
+      console.warn("Payment handler error, falling back to legacy mode");
+
+      // Hide the start screen
+      const startScreen = document.getElementById("start-screen");
+      if (startScreen) {
+        startScreen.style.display = "none";
+      }
+
+      // Show the game container
+      const gameContainer = document.querySelector(".game-container");
+      if (gameContainer) {
+        gameContainer.style.display = "block";
+      }
+
+      // Initialize game the old way
+      initGame();
+    });
+}
+
+function startGameWithConfig(sessionData) {
+  console.log("Starting game with config:", sessionData);
+
+  // Hide the start screen
+  const startScreen = document.getElementById("start-screen");
+  if (startScreen) {
+    startScreen.style.display = "none";
+  }
+
+  // Show the game container
+  const gameContainer = document.querySelector(".game-container");
+  if (gameContainer) {
+    gameContainer.style.display = "block";
+  }
+
+  // Store the session data
+  sessionId = sessionData.config.session_id;
+  gameConfig = sessionData.config;
+
+  // Initialize game
+  initGame();
+
+  // Reset the pending flag
+  pendingGameStart = false;
+}
+
+function initializeLeaderboardButtons() {
+  const viewLeaderboardButton = document.getElementById(
+    "view-leaderboard-button",
+  );
+  if (viewLeaderboardButton) {
+    viewLeaderboardButton.addEventListener("click", function () {
+      if (gameOverDialog) {
+        gameOverDialog.style.display = "none";
+      }
+      if (window.gameLeaderboard) {
+        window.gameLeaderboard.showLeaderboard();
+      } else {
+        console.error("gameLeaderboard not found");
+        document.getElementById("game-section").style.display = "none";
+        document.getElementById("leaderboard-section").style.display = "block";
+      }
+    });
+  }
+}
+function setupStartGameButton() {
+  console.log("Setting up start game button");
+
+  const startGameBtn = document.getElementById("startGameBtn");
+  if (startGameBtn) {
+    // Remove any existing event listeners
+    startGameBtn.removeEventListener("click", startGame);
+
+    // Add the event listener
+    startGameBtn.addEventListener("click", startGame);
+    console.log("Start game button event listener attached");
+  } else {
+    console.error("Start game button not found");
   }
 }
 
 document.addEventListener("DOMContentLoaded", function () {
   initializeElements();
-
   setupStartScreenButtons();
+  setupStartGameButton();
+  initializeLeaderboardButtons();
+  setupNavButtons();
 
   setTimeout(function () {
     setupStartScreenButtons();
+    initializeLeaderboardButtons();
+    setupNavButtons();
     checkAuthStatus();
   }, 1000);
 });
 
+function setupNavButtons() {
+  const showGameBtn = document.getElementById("show-game");
+  if (showGameBtn) {
+    showGameBtn.addEventListener("click", function () {
+      // Hide leaderboard section
+      document.getElementById("leaderboard-section").style.display = "none";
+
+      // Show game section
+      document.getElementById("game-section").style.display = "block";
+
+      // Show game content
+      document.querySelector(".game-section-content").style.display = "block";
+
+      // Show start screen, hide game container
+      document.getElementById("start-screen").style.display = "flex";
+      document.querySelector(".game-container").style.display = "none";
+    });
+  }
+}
+
 function setupStartScreenButtons() {
   const startLoginBtn = document.getElementById("startLoginBtn");
   const startRegisterBtn = document.getElementById("startRegisterBtn");
+  const startGameBtn = document.getElementById("startGameBtn");
 
   if (startLoginBtn) {
     startLoginBtn.addEventListener("click", function () {
@@ -102,6 +292,12 @@ function setupStartScreenButtons() {
       } else {
         console.error("Auth client not initialized yet");
       }
+    });
+  }
+
+  if (startGameBtn) {
+    startGameBtn.addEventListener("click", function () {
+      startGame();
     });
   }
 }
@@ -140,12 +336,6 @@ function initializeElements() {
       initGame();
     });
   }
-
-  // Add restart button event listener
-  restartButton.addEventListener("click", function () {
-    gameOverDialog.style.display = "none";
-    initGame();
-  });
 
   console.log("Game elements initialized successfully");
   return true;
@@ -660,7 +850,14 @@ function gameOver() {
 
   // Submit score to server if logged in
   if (window.gameAuth && window.gameAuth.isLoggedIn()) {
-    submitScore(gameState.score, gameState.level, gameState.gameTime);
+    submitScore(gameState.score, gameState.level, gameState.gameTime).then(
+      () => {
+        // After submitting the score, refresh the leaderboard
+        if (window.gameLeaderboard) {
+          window.gameLeaderboard.loadTopScores();
+        }
+      },
+    );
   }
 
   // Show game over dialog
@@ -712,11 +909,31 @@ window.addEventListener("auth:login", (event) => {
 
   localStorage.setItem("currentGameSession", sessionId);
 
-  // Hide start screen and start game immediately after login
-  document.getElementById("start-screen").style.display = "none";
+  // Hide welcome screen
+  const welcomeScreen = document.getElementById("welcome-screen");
+  if (welcomeScreen) {
+    welcomeScreen.style.display = "none";
+  }
 
-  // Start new game
-  initGame();
+  // Hide leaderboard if it's showing
+  document.getElementById("leaderboard-section").style.display = "none";
+
+  // Show game section and its content
+  document.getElementById("game-section").style.display = "block";
+  document.querySelector(".game-section-content").style.display = "block";
+
+  // Show start screen, hide game container
+  document.getElementById("start-screen").style.display = "flex";
+  document.querySelector(".game-container").style.display = "none";
+
+  // Show the Play Game button in the nav
+  const playGameButton = document.getElementById("show-game");
+  if (playGameButton) {
+    playGameButton.style.display = "inline-block";
+  }
+
+  // Make sure start button works
+  setupStartGameButton();
 });
 
 function getCurrentSessionId() {
@@ -735,9 +952,30 @@ function getCurrentSessionId() {
   return null;
 }
 
+// Modify the auth logout event listener
 window.addEventListener("auth:logout", () => {
   console.log("User logged out");
   sessionId = null;
+  pendingGameStart = false; // Reset pending game start
+
+  if (welcomeScreen) {
+    welcomeScreen.style.display = "flex";
+  }
+  if (gameSectionContent) {
+    gameSectionContent.style.display = "none";
+  }
+
+  const playGameButton = document.getElementById("show-game");
+  if (playGameButton) {
+    playGameButton.style.display = "none";
+  }
+
+  document.getElementById("game-section").style.display = "none";
+
+  // If payment modal is open, close it
+  if (window.gamePayment && window.gamePayment.paymentModal) {
+    window.gamePayment.hidePaymentModal();
+  }
 });
 
 function debugSessionState() {

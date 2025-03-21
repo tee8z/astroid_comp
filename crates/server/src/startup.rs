@@ -21,17 +21,21 @@ use reqwest_middleware::{
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use std::sync::Arc;
 use std::{net::SocketAddr, str::FromStr};
-use tokio::signal::unix::{signal, SignalKind};
 use tokio::{net::TcpListener, select};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    spawn,
+};
 use tower_http::{
     cors::{Any, CorsLayer},
     services::{ServeDir, ServeFile},
 };
 
 use crate::{
-    config::Settings, file_utils::create_folder, get_game_config, get_top_scores, get_user_scores,
-    health_check, index_handler, login, register, start_new_session, submit_score, GameStore,
-    UserStore,
+    check_payment_status, check_prize_eligibility, claim_prize, config::Settings,
+    file_utils::create_folder, get_game_config, get_top_scores, get_user_scores, health_check,
+    index_handler, login, register, run_daily_tasks, start_new_session, submit_score, GameStore,
+    LightningService, PaymentStore, UserStore,
 };
 pub struct Application {
     server: Serve<
@@ -74,6 +78,8 @@ pub struct AppState {
     pub remote_url: String,
     pub user_store: UserStore,
     pub game_store: GameStore,
+    pub payment_store: PaymentStore,
+    pub lightning_service: LightningService,
 }
 
 pub async fn build_app(config: Settings) -> Result<(AppState, ServeDir<ServeFile>), anyhow::Error> {
@@ -112,11 +118,22 @@ pub async fn build_app(config: Settings) -> Result<(AppState, ServeDir<ServeFile
 
     info!("Database migrations completed successfully");
 
+    let lightning_service = LightningService::new(
+        build_reqwest_client(),
+        config.api_settings.voltage_api_url.clone(),
+        config.api_settings.voltage_api_key.clone(),
+        config.api_settings.voltage_org_id.clone(),
+        config.api_settings.voltage_env_id.clone(),
+        config.api_settings.voltage_wallet_id.clone(),
+    );
+
     let app_state = AppState {
         ui_dir: config.ui_settings.ui_dir,
         remote_url: config.ui_settings.remote_url,
         user_store: UserStore::new(db_pool.clone()),
         game_store: GameStore::new(db_pool.clone()),
+        payment_store: PaymentStore::new(db_pool.clone()),
+        lightning_service,
     };
     Ok((app_state, serve_dir))
 }
@@ -136,7 +153,12 @@ pub async fn build_server(
     let listener = TcpListener::bind(socket_addr).await?;
 
     info!("Setting up service");
-    let app = app(app_state, serve_dir);
+    let app = app(app_state.clone(), serve_dir);
+
+    // Spawn the daily tasks in the background
+    // TODO have this close down with the server gracefully
+    spawn(run_daily_tasks(Arc::new(app_state)));
+
     let server = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -166,12 +188,21 @@ pub fn app(app_state: AppState, serve_dir: ServeDir<ServeFile>) -> Router {
         .route("/scores/top", get(get_top_scores))
         .route("/scores/user", get(get_user_scores));
 
+    let payment_endpoints = Router::new().route("/status/{payment_id}", get(check_payment_status));
+
+    let prize_endpoints = Router::new()
+        .route("/check", get(check_prize_eligibility))
+        .route("/claim", post(claim_prize));
+
     Router::new()
         .route("/", get(index_handler))
         .fallback(index_handler)
+        //TODO: do a check against the voltage api to make sure that's all okay
         .route("/api/v1/health_check", get(health_check))
         .nest("/api/v1/users", users_endpoints)
         .nest("/api/v1/game", game_endpoints)
+        .nest("/api/v1/payments", payment_endpoints)
+        .nest("/api/v1/prizes", prize_endpoints)
         .layer(middleware::from_fn(log_request))
         .with_state(Arc::new(app_state))
         .nest_service("/ui", serve_dir.clone())
