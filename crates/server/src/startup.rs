@@ -5,7 +5,7 @@ use axum::{
     http::Extensions,
     middleware::{self, AddExtension, Next},
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     serve::Serve,
     Router,
 };
@@ -28,7 +28,11 @@ use tower_http::{
     services::{ServeDir, ServeFile},
 };
 
-use crate::{config::Settings, file_utils::create_folder, index_handler};
+use crate::{
+    config::Settings, file_utils::create_folder, get_game_config, get_top_scores, get_user_scores,
+    health_check, index_handler, login, register, start_new_session, submit_score, GameStore,
+    UserStore,
+};
 pub struct Application {
     server: Serve<
         TcpListener,
@@ -68,6 +72,8 @@ impl Application {
 pub struct AppState {
     pub ui_dir: String,
     pub remote_url: String,
+    pub user_store: UserStore,
+    pub game_store: GameStore,
 }
 
 pub async fn build_app(config: Settings) -> Result<(AppState, ServeDir<ServeFile>), anyhow::Error> {
@@ -85,9 +91,32 @@ pub async fn build_app(config: Settings) -> Result<(AppState, ServeDir<ServeFile
 
     create_folder(&config.db_settings.data_folder.clone());
 
+    let db_path = format!("{}/game.db", config.db_settings.data_folder);
+    let database_url = format!("sqlite:{}", db_path);
+    info!("Connecting to database at {}", database_url);
+
+    let db_pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .map_err(|e| anyhow!("Failed to connect to database: {}", e))?;
+
+    info!("Running database migrations");
+    let migrations_path = std::path::Path::new(&config.db_settings.migrations_folder);
+    sqlx::migrate::Migrator::new(migrations_path)
+        .await
+        .map_err(|e| anyhow!("Failed to prepare migrations: {}", e))?
+        .run(&db_pool)
+        .await
+        .map_err(|e| anyhow!("Failed to run migrations: {}", e))?;
+
+    info!("Database migrations completed successfully");
+
     let app_state = AppState {
         ui_dir: config.ui_settings.ui_dir,
         remote_url: config.ui_settings.remote_url,
+        user_store: UserStore::new(db_pool.clone()),
+        game_store: GameStore::new(db_pool.clone()),
     };
     Ok((app_state, serve_dir))
 }
@@ -104,8 +133,7 @@ pub async fn build_server(
     >,
     anyhow::Error,
 > {
-    let std_listener = std::net::TcpListener::bind(socket_addr)?;
-    let listener = TcpListener::from_std(std_listener)?;
+    let listener = TcpListener::bind(socket_addr).await?;
 
     info!("Setting up service");
     let app = app(app_state, serve_dir);
@@ -127,15 +155,23 @@ pub fn app(app_state: AppState, serve_dir: ServeDir<ServeFile>) -> Router {
         .allow_headers([ACCEPT, CONTENT_TYPE, AUTHORIZATION])
         .allow_origin(Any);
 
-    /*let users_endpoints = Router::new()
-    .route("/login", post(login))
-    .route("/register", post(register));*/
+    let users_endpoints = Router::new()
+        .route("/login", post(login))
+        .route("/register", post(register));
+
+    let game_endpoints = Router::new()
+        .route("/config", get(get_game_config))
+        .route("/session", post(start_new_session))
+        .route("/score", post(submit_score))
+        .route("/scores/top", get(get_top_scores))
+        .route("/scores/user", get(get_user_scores));
 
     Router::new()
         .route("/", get(index_handler))
         .fallback(index_handler)
-        //.route("/api/v1/health_check", get(health))
-        //.nest("/api/v1/users", users_endpoints)
+        .route("/api/v1/health_check", get(health_check))
+        .nest("/api/v1/users", users_endpoints)
+        .nest("/api/v1/game", game_endpoints)
         .layer(middleware::from_fn(log_request))
         .with_state(Arc::new(app_state))
         .nest_service("/ui", serve_dir.clone())

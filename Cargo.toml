@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/server"]
+members = ["crates/server","crates/nostr_signer"]
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.

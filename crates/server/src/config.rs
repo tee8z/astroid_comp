@@ -35,12 +35,14 @@ pub struct Settings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DBSettings {
     pub data_folder: String,
+    pub migrations_folder: String,
 }
 
 impl Default for DBSettings {
     fn default() -> Self {
         DBSettings {
             data_folder: String::from("./data"),
+            migrations_folder: String::from("./crates/server/migrations"),
         }
     }
 }

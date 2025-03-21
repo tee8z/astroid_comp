@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS users;
+
+DROP TABLE IF EXISTS game_sessions;
+
+DROP TABLE IF EXISTS game_configs;
+
+DROP TABLE IF EXISTS scores;
