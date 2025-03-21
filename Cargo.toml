@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/server"]
+
+[profile.release]
+# Tell `rustc` to optimize for small code size.
+opt-level = "s"
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
